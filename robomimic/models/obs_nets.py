@@ -581,9 +581,38 @@ class MIMO_MLP(Module):
             outputs (dict): dictionary of output torch.Tensors, that corresponds
                 to @self.output_shapes
         """
+        #print("INPUTS")
+        #print(**inputs)
+        
         enc_outputs = self.nets["encoder"](**inputs)
         mlp_out = self.nets["mlp"](enc_outputs)
+
+       
+      #  print("DECODER ")
+
+      #  print(self.nets["decoder"](mlp_out))
         return self.nets["decoder"](mlp_out)
+    def encoderA_output(self, inputs):
+        return self.nets["encoder"](**inputs)
+
+    def Jacobian_helper(self, enc_output):
+        mlp_out = self.nets["mlp"](enc_output)
+       # print("action")
+       # print(self.nets["decoder"](mlp_out)["action"])
+        return torch.tanh(self.nets["decoder"](mlp_out)["action"][0])
+    
+    def  mjv(self, enc_output):
+         return torch.autograd.functional.jacobian(self.Jacobian_helper, (enc_output))
+    def  jvp(self, enc_output, v):
+        return torch.autograd.functional.jvp(self.Jacobian_helper, (enc_output), v)   
+    
+    def  vjp(self, enc_output, u):
+        return torch.autograd.functional.vjp(self.Jacobian_helper, (enc_output), u)     
+ 
+
+    
+
+        
 
     def _to_string(self):
         """

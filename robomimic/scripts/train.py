@@ -423,5 +423,9 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    # args.config="robomimic/exps/templates/bc.json"
+    # args.dataset="datasets/square/ph/low_dim_v141.hdf5"
+    # print("config="+args.config)
+    # print("dataset="+args.dataset)
     main(args)
 
