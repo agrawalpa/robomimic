@@ -326,6 +326,8 @@ def train(config, device):
 
     # terminate logging
     data_logger.close()
+    for key in envs:
+        envs[key].env.close()
 
 
 def main(args):

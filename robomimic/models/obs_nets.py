@@ -415,6 +415,8 @@ class ObservationGroupEncoder(Module):
                 encoder_kwargs=encoder_kwargs,
             )
 
+        self.enc_outputs = None
+
     def forward(self, **inputs):
         """
         Process each set of inputs in its own observation group.
@@ -587,6 +589,7 @@ class MIMO_MLP(Module):
         enc_outputs = self.nets["encoder"](**inputs)
         mlp_out = self.nets["mlp"](enc_outputs)
 
+        self.enc_outputs = enc_outputs
        
       #  print("DECODER ")
 

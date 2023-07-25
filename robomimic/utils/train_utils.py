@@ -27,7 +27,7 @@ from robomimic.envs.wrappers import EnvWrapper
 from robomimic.algo import RolloutPolicy
 
 
-def get_exp_dir(config, auto_remove_exp_dir=False):
+def get_exp_dir(config, auto_remove_exp_dir=True):
     """
     Create experiment directory from config. If an identical experiment directory
     exists and @auto_remove_exp_dir is False (default), the function will prompt 

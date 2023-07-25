@@ -20,17 +20,15 @@ import robomimic.utils.torch_utils as TorchUtils
 import robomimic.utils.obs_utils as ObsUtils
 from robomimic.algo import register_algo_factory_func, PolicyAlgo
 
-
 collect = False
 batches = []
 lips = []
 jacobian = True
 weighted = False
 jweight = 1.0
+
+
 @register_algo_factory_func("bc")
-
-
-
 def algo_config_to_class(algo_config):
     """
     Maps algo config to the BC algo class to instantiate, along with additional algo kwargs.
@@ -67,6 +65,7 @@ class BC(PolicyAlgo):
     """
     Normal BC training.
     """
+
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
@@ -82,13 +81,10 @@ class BC(PolicyAlgo):
         self.nets = self.nets.float().to(self.device)
         self.states = []
         self.actions = []
-        #self.KDTree
+        # self.KDTree
         self.k = 3
         self.maxL = 0
         self.minL = 0
-
-
-
 
     def process_batch_for_training(self, batch):
         """
@@ -105,19 +101,17 @@ class BC(PolicyAlgo):
         """
         input_batch = dict()
         input_batch["obs"] = {k: batch["obs"][k][:, 0, :] for k in batch["obs"]}
-        input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
+        input_batch["goal_obs"] = batch.get("goal_obs", None)  # goals may not be present
         input_batch["actions"] = batch["actions"][:, 0, :]
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
 
     def on_epoch_end(self, epoch):
-        
+
         global collect
         global batches
         if epoch == 1 and collect:
             collect = False
-        
 
-     
             numpy_list = [numpy.asarray(t.cpu()) for t in self.states]
             numpy_list2 = [numpy.asarray(t.cpu()) for t in self.actions]
             self.KDTree = KDTree(numpy_list)
@@ -150,40 +144,29 @@ class BC(PolicyAlgo):
         if collect:
 
             batches.append(batch)
-          
 
-            #print(type(batch["obs"]))
+            # print(type(batch["obs"]))
             for i in batch['actions']:
                 self.actions.append(i)
 
-         
             temp = self.nets["policy"]
-           
+
             for j in temp.encoderA_output(batch):
-                
-              
                 self.states.append(j)
-                
-               
+
                 lips.append(self.local_lipschitz(j))
             self.minL = min(lips)
             self.maxL = max(lips)
-            
-
-            
-
 
         with TorchUtils.maybe_no_grad(no_grad=validate):
             info = super(BC, self).train_on_batch(batch, epoch, validate=validate)
-            predictions = self._forward_training(batch)
+            predictions, encoder_out = self._forward_training(batch)
             losses = self._compute_losses(predictions, batch)
 
             info["predictions"] = TensorUtils.detach(predictions)
             info["losses"] = TensorUtils.detach(losses)
 
             if not validate and not collect:
-
-
                 step_info = self._train_step(losses)
                 info.update(step_info)
 
@@ -205,7 +188,8 @@ class BC(PolicyAlgo):
         actions = self.nets["policy"](obs_dict=batch["obs"], goal_dict=batch["goal_obs"])
 
         predictions["actions"] = actions
-        return predictions
+        encoder_out = self.nets["policy"].enc_outputs
+        return predictions, encoder_out
 
     def local_lipschitz(self, i):
         global weighted
@@ -217,28 +201,10 @@ class BC(PolicyAlgo):
             for i in range(len(ind)):
                 for j in range(len(ind)):
                     if i != j:
-                        lip.add(torch.dist(self.states[i], self.states[j])/torch.dist(self.actions[i], self.actions[j]))
-
-
-
+                        lip.add(
+                            torch.dist(self.states[i], self.states[j]) / torch.dist(self.actions[i], self.actions[j]))
 
             return (max(lip))
-
-
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
 
     def _compute_losses(self, predictions, batch):
         """
@@ -264,29 +230,25 @@ class BC(PolicyAlgo):
         losses["cos_loss"] = LossUtils.cosine_loss(actions[..., :3], a_target[..., :3])
         global jacobian
         global collect
-        
+
         if jacobian and not collect:
             Jloss = JacobianLoss()
 
-            losses["Jacobian"] = Jloss(predictions, batch, self)
+            losses["Jacobian"] = Jloss(self.nets, batch, self)
         else:
             losses["Jacobian"] = torch.tensor(0.00, dtype=torch.float32)
-
-
 
         global jweight
         action_losses = [
             self.algo_config.loss.l2_weight * losses["l2_loss"],
-            self.algo_config. loss.l1_weight * losses["l1_loss"],
+            self.algo_config.loss.l1_weight * losses["l1_loss"],
             self.algo_config.loss.cos_weight * losses["cos_loss"],
             jweight * losses["Jacobian"]
         ]
         action_loss = sum(action_losses)
-        
-       
-        
+
         losses["action_loss"] = action_loss
-        
+
         return losses
 
     def _train_step(self, losses):
@@ -319,7 +281,7 @@ class BC(PolicyAlgo):
         Returns:
             loss_log (dict): name -> summary statistic
         """
-        
+
         log = super(BC, self).log_info(info)
         log["Loss"] = info["losses"]["action_loss"].item()
         if "l2_loss" in info["losses"]:
@@ -329,7 +291,7 @@ class BC(PolicyAlgo):
         if "cos_loss" in info["losses"]:
             log["Cosine_Loss"] = info["losses"]["cos_loss"].item()
         if "Jacobian" in info["losses"]:
-            log["Jacobian"] = info["losses"]["Jacobian"].item()    
+            log["Jacobian"] = info["losses"]["Jacobian"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
@@ -353,6 +315,7 @@ class BC_Gaussian(BC):
     """
     BC training with a Gaussian policy.
     """
+
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
@@ -388,7 +351,7 @@ class BC_Gaussian(BC):
             predictions (dict): dictionary containing network outputs
         """
         dists = self.nets["policy"].forward_train(
-            obs_dict=batch["obs"], 
+            obs_dict=batch["obs"],
             goal_dict=batch["goal_obs"],
         )
 
@@ -436,7 +399,7 @@ class BC_Gaussian(BC):
         """
         log = PolicyAlgo.log_info(self, info)
         log["Loss"] = info["losses"]["action_loss"].item()
-        log["Log_Likelihood"] = info["losses"]["log_probs"].item() 
+        log["Log_Likelihood"] = info["losses"]["log_probs"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
@@ -446,6 +409,7 @@ class BC_GMM(BC_Gaussian):
     """
     BC training with a Gaussian Mixture Model policy.
     """
+
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
@@ -472,6 +436,7 @@ class BC_VAE(BC):
     """
     BC training with a VAE policy.
     """
+
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
@@ -485,7 +450,7 @@ class BC_VAE(BC):
             encoder_kwargs=ObsUtils.obs_encoder_kwargs_from_config(self.obs_config.encoder),
             **VAENets.vae_args_from_config(self.algo_config.vae),
         )
-        
+
         self.nets = self.nets.float().to(self.device)
 
     def train_on_batch(self, batch, epoch, validate=False):
@@ -582,6 +547,7 @@ class BC_RNN(BC):
     """
     BC training with an RNN policy.
     """
+
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
@@ -618,7 +584,7 @@ class BC_RNN(BC):
         """
         input_batch = dict()
         input_batch["obs"] = batch["obs"]
-        input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
+        input_batch["goal_obs"] = batch.get("goal_obs", None)  # goals may not be present
         input_batch["actions"] = batch["actions"]
 
         if self._rnn_is_open_loop:
@@ -675,6 +641,7 @@ class BC_RNN_GMM(BC_RNN):
     """
     BC training with an RNN GMM policy.
     """
+
     def _create_networks(self):
         """
         Creates networks and places them into @self.nets.
@@ -716,13 +683,13 @@ class BC_RNN_GMM(BC_RNN):
             predictions (dict): dictionary containing network outputs
         """
         dists = self.nets["policy"].forward_train(
-            obs_dict=batch["obs"], 
+            obs_dict=batch["obs"],
             goal_dict=batch["goal_obs"],
         )
 
         # make sure that this is a batch of multivariate action distributions, so that
         # the log probability computation will be correct
-        assert len(dists.batch_shape) == 2 # [B, T]
+        assert len(dists.batch_shape) == 2  # [B, T]
         log_probs = dists.log_prob(batch["actions"])
 
         predictions = OrderedDict(
@@ -764,40 +731,58 @@ class BC_RNN_GMM(BC_RNN):
         """
         log = PolicyAlgo.log_info(self, info)
         log["Loss"] = info["losses"]["action_loss"].item()
-        log["Log_Likelihood"] = info["losses"]["log_probs"].item() 
+        log["Log_Likelihood"] = info["losses"]["log_probs"].item()
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
-class JacobianLoss(nn.Module):
-        def __init__(self):
-            super(JacobianLoss, self).__init__()
-        def forward(self, predictions, batch, BC):
-            msv = torch.empty(100, 1, dtype=torch.float32)
-            
-            fcount = 0
-            temp = BC.nets["policy"]
-            for i in temp.encoderA_output(batch):
-                with torch.no_grad():
-                    ll = BC.local_lipschitz( i)
-                    lweight = 1.00
-                    if weighted and ll <= BC.maxL:
-                        lweight = (BC.maxL - ll  )/(BC.maxL - BC.minL)
-                count = 0
-                n = 3
-                u = torch.rand(7).to('cuda')
-                #while count < n:
-                #    
-                #    v = temp.vjp(i, u)[1]
-                #    
-                #    u = temp.jvp(i, v)[1]
-                #    count = count + 1
-            
-                
-                #msv[fcount] = ((torch.norm(u, p = 2)/torch.norm(v, p = 2)) * (torch.norm(u, p = 2)/torch.norm(v, p = 2)) * lweight)
-                msv[fcount] = torch.square(torch.sum(temp.mjv(i)))
-                    
-                
-                fcount = fcount + 1    
-            #print(msv)
 
-            return torch.sum(msv, dtype=torch.float32)
+
+class JacobianLoss(nn.Module):
+    def __init__(self):
+        super(JacobianLoss, self).__init__()
+
+    def forward(self, nets, batch, BC):
+        # msv = torch.empty(100, 1, dtype=torch.float32)
+
+        # fcount = 0
+        # for i in encoder_out:
+        # with torch.no_grad():
+        #     ll = BC.local_lipschitz(i)
+        #     lweight = 1.00
+        #     if weighted and ll <= BC.maxL:
+        #         lweight = (BC.maxL - ll) / (BC.maxL - BC.minL)
+        # count = 0
+        # n = 3
+        # u = torch.rand(7).to('cuda')
+        # while count < n:
+        #
+        #    v = temp.vjp(i, u)[1]
+        #
+        #    u = temp.jvp(i, v)[1]
+        #    count = count + 1
+
+        # msv[fcount] = ((torch.norm(u, p = 2)/torch.norm(v, p = 2)) * (torch.norm(u, p = 2)/torch.norm(v, p = 2)) * lweight)
+        # torch.autograd.functional.jacobian(self.Jacobian_helper, (encoder_out))
+
+        # fcount = fcount + 1
+        # print(msv)
+        observation_group_shapes = OrderedDict([('obs', OrderedDict(
+            [('object', [14]), ('robot0_eef_pos', [3]), ('robot0_eef_quat', [4]), ('robot0_gripper_qpos', [2])]))])
+        outputs = []
+        # Deterministic order since self.observation_group_shapes is OrderedDict
+        for obs_group in observation_group_shapes:
+            # pass through encoder
+            outputs.append(
+                nets.policy.nets.encoder.nets[obs_group].forward(batch[obs_group])
+            )
+
+        val = torch.cat(outputs, dim=-1)
+
+        def partial_net(enc_outputs):
+            out = nets["policy"].nets["mlp"](enc_outputs)
+            actions = nets["policy"].nets["decoder"](out)
+            return torch.tanh(actions["action"])
+
+        msv = torch.autograd.functional.jacobian(partial_net, val, create_graph=True)
+        msv = torch.sum(torch.square(msv))
+        return torch.sum(msv, dtype=torch.float32)
