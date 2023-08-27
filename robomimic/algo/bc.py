@@ -6,7 +6,12 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from pyquaternion import Quaternion
+
+import torch.distributions as D
+
+
 import robomimic.models.base_nets as BaseNets
 import robomimic.models.obs_nets as ObsNets
 import robomimic.models.policy_nets as PolicyNets
@@ -39,18 +44,40 @@ def algo_config_to_class(algo_config):
     gmm_enabled = ("gmm" in algo_config and algo_config.gmm.enabled)
     vae_enabled = ("vae" in algo_config and algo_config.vae.enabled)
 
-    if algo_config.rnn.enabled:
-        if gmm_enabled:
-            return BC_RNN_GMM, {}
-        return BC_RNN, {}
-    assert sum([gaussian_enabled, gmm_enabled, vae_enabled]) <= 1
+    rnn_enabled = algo_config.rnn.enabled
+    # support legacy configs that do not have "transformer" item
+    transformer_enabled = ("transformer" in algo_config) and algo_config.transformer.enabled
+
     if gaussian_enabled:
-        return BC_Gaussian, {}
-    if gmm_enabled:
-        return BC_GMM, {}
-    if vae_enabled:
-        return BC_VAE, {}
-    return BC, {}
+        if rnn_enabled:
+            raise NotImplementedError
+        elif transformer_enabled:
+            raise NotImplementedError
+        else:
+            algo_class, algo_kwargs = BC_Gaussian, {}
+    elif gmm_enabled:
+        if rnn_enabled:
+            algo_class, algo_kwargs = BC_RNN_GMM, {}
+        elif transformer_enabled:
+            algo_class, algo_kwargs = BC_Transformer_GMM, {}
+        else:
+            algo_class, algo_kwargs = BC_GMM, {}
+    elif vae_enabled:
+        if rnn_enabled:
+            raise NotImplementedError
+        elif transformer_enabled:
+            raise NotImplementedError
+        else:
+            algo_class, algo_kwargs = BC_VAE, {}
+    else:
+        if rnn_enabled:
+            algo_class, algo_kwargs = BC_RNN, {}
+        elif transformer_enabled:
+            algo_class, algo_kwargs = BC_Transformer, {}
+        else:
+            algo_class, algo_kwargs = BC, {}
+
+    return algo_class, algo_kwargs
 
 
 class BC(PolicyAlgo):
@@ -88,7 +115,10 @@ class BC(PolicyAlgo):
         input_batch["obs"] = {k: batch["obs"][k][:, 0, :] for k in batch["obs"]}
         input_batch["goal_obs"] = batch.get("goal_obs", None) # goals may not be present
         input_batch["actions"] = batch["actions"][:, 0, :]
-        return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
+        # we move to device first before float conversion because image observation modalities will be uint8 -
+        # this minimizes the amount of data transferred to GPU
+        return TensorUtils.to_float(TensorUtils.to_device(input_batch, self.device))
+
 
     def train_on_batch(self, batch, epoch, validate=False):
         """
@@ -510,6 +540,7 @@ class BC_RNN(BC):
             obs_seq_start = TensorUtils.index_at_time(batch["obs"], ind=0)
             input_batch["obs"] = TensorUtils.unsqueeze_expand_at(obs_seq_start, size=n_steps, dim=1)
 
+
         return TensorUtils.to_device(TensorUtils.to_float(input_batch), self.device)
     
     def _forward_training(self, batch):
@@ -566,6 +597,11 @@ class BC_RNN(BC):
         action_loss = sum(action_losses)
         losses["action_loss"] = action_loss
         return losses
+
+        # we move to device first before float conversion because image observation modalities will be uint8 -
+        # this minimizes the amount of data transferred to GPU
+        return TensorUtils.to_float(TensorUtils.to_device(input_batch, self.device))
+
 
     def get_action(self, obs_dict, goal_dict=None):
         """
@@ -714,6 +750,7 @@ class BC_RNN_GMM(BC_RNN):
         if "policy_grad_norms" in info:
             log["Policy_Grad_Norms"] = info["policy_grad_norms"]
         return log
+
     def get_action(self, obs_dict, goal_dict=None):
         """
         Get policy action outputs.
@@ -722,9 +759,8 @@ class BC_RNN_GMM(BC_RNN):
             obs_dict (dict): current observation
             goal_dict (dict): (optional) goal
 
-        Returns:
-            action (torch.Tensor): action tensor
-        """
+
+
         assert not self.nets.training
         if self.w_mode is False:
             if self._rnn_hidden_state is None or self._rnn_counter % self._rnn_horizon == 0:
@@ -806,3 +842,7 @@ class BC_RNN_GMM(BC_RNN):
                 self.w_mode = False
 
             return action
+
+
+
+
