@@ -51,6 +51,8 @@
         "pad_frame_stack": true,
         "dataset_keys": [
             "actions",
+            "waypoints",
+            "modes_dense",
             "rewards",
             "dones"
         ],
@@ -93,7 +95,7 @@
             "low_noise_eval": true
         },
         "gmm": {
-            "enabled": false,
+            "enabled": true,
             "num_modes": 5,
             "min_std": 0.0001,
             "std_activation": "softplus",
@@ -135,7 +137,7 @@
             ]
         },
         "rnn": {
-            "enabled": false,
+            "enabled": true,
             "horizon": 10,
             "hidden_dim": 400,
             "rnn_type": "LSTM",
@@ -164,9 +166,7 @@
         "modalities": {
             "obs": {
                 "low_dim": [
-                    "robot0_eef_pos",
-                    "robot0_eef_quat",
-                    "robot0_gripper_qpos",
+
                     "object"
                 ],
                 "rgb": [],
